@@ -38,14 +38,6 @@ All processing happens in your browser. No data is uploaded to any server.
 
 Unrecognised shift codes are included as all-day events.
 
-## Hosting
-
-This is a single `index.html` file with no dependencies to install. To host it:
-
-1. Push to a GitHub repository
-2. Go to Settings > Pages > set source to `main` branch
-3. Share the link with your colleagues
-
 ## License
 
 MIT
