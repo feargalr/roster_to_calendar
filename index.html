@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LMH ED Roster to Calendar</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; color: #333; min-height: 100vh; }
+.container { max-width: 900px; margin: 0 auto; padding: 20px; }
+h1 { text-align: center; margin: 20px 0 8px; font-size: 1.6em; color: #1a3a5c; }
+.subtitle { text-align: center; color: #666; margin-bottom: 30px; font-size: 0.95em; }
+.step { background: #fff; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.step-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.step-number { background: #2563eb; color: #fff; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9em; flex-shrink: 0; }
+.step-title { font-size: 1.1em; font-weight: 600; }
+.step.disabled { opacity: 0.5; pointer-events: none; }
+
+/* Upload area */
+.upload-area { border: 2px dashed #cbd5e1; border-radius: 10px; padding: 40px 20px; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s; }
+.upload-area:hover, .upload-area.dragover { border-color: #2563eb; background: #eff6ff; }
+.upload-area input { display: none; }
+.upload-icon { font-size: 2.5em; margin-bottom: 10px; }
+.upload-text { color: #64748b; }
+.upload-text strong { color: #2563eb; }
+.file-name { margin-top: 12px; padding: 8px 16px; background: #e8f5e9; border-radius: 6px; display: inline-block; color: #2e7d32; font-weight: 500; }
+
+/* Select */
+select { width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 1em; background: #fff; cursor: pointer; }
+select:focus { outline: none; border-color: #2563eb; }
+
+/* Buttons */
+.btn-group { display: flex; gap: 12px; flex-wrap: wrap; }
+.btn { padding: 12px 24px; border: none; border-radius: 8px; font-size: 1em; font-weight: 600; cursor: pointer; transition: background 0.2s; flex: 1; min-width: 200px; }
+.btn-google { background: #4285f4; color: #fff; }
+.btn-google:hover { background: #3367d6; }
+.btn-ical { background: #333; color: #fff; }
+.btn-ical:hover { background: #555; }
+
+/* Table */
+.preview-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.9em; }
+.preview-table th { background: #f1f5f9; padding: 10px 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #e2e8f0; }
+.preview-table td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
+.preview-table tr:hover td { background: #f8fafc; }
+.shift-count { color: #64748b; font-size: 0.9em; margin-bottom: 8px; }
+.table-scroll { overflow-x: auto; }
+
+@media (max-width: 600px) {
+  .container { padding: 12px; }
+  .step { padding: 16px; }
+  .btn { min-width: 100%; }
+  h1 { font-size: 1.3em; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>LMH ED Roster to Calendar</h1>
+  <p class="subtitle">Convert your Emergency Department roster to Google Calendar or Apple Calendar</p>
+
+  <!-- Step 1: Upload -->
+  <div class="step" id="step1">
+    <div class="step-header">
+      <div class="step-number">1</div>
+      <div class="step-title">Upload Roster File</div>
+    </div>
+    <div class="upload-area" id="uploadArea">
+      <input type="file" id="fileInput" accept=".xlsx,.xls">
+      <div class="upload-icon">📁</div>
+      <p class="upload-text">Drag & drop your Excel roster here, or <strong>click to browse</strong></p>
+      <div class="file-name" id="fileName" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- Step 2: Select name -->
+  <div class="step disabled" id="step2">
+    <div class="step-header">
+      <div class="step-number">2</div>
+      <div class="step-title">Select Your Name</div>
+    </div>
+    <select id="nameSelect">
+      <option value="">-- Select your name --</option>
+    </select>
+  </div>
+
+  <!-- Step 3: Preview -->
+  <div class="step disabled" id="step3">
+    <div class="step-header">
+      <div class="step-number">3</div>
+      <div class="step-title">Preview & Download</div>
+    </div>
+    <div class="shift-count" id="shiftCount"></div>
+    <div class="table-scroll">
+      <table class="preview-table" id="previewTable">
+        <thead><tr><th>Shift</th><th>Date</th><th>Start</th><th>End</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="btn-group" style="margin-top: 20px;">
+      <button class="btn btn-google" id="btnGoogle">Download Google Calendar CSV</button>
+      <button class="btn btn-ical" id="btnIcal">Download .ics (Apple / Outlook)</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const SHIFT_MAP = {
+  // Standard ED shifts
+  'AM':   { start: '07:30', end: '16:30', allDay: false, nextDay: false },
+  'PM':   { start: '15:00', end: '23:59', allDay: false, nextDay: false },
+  'C/S':  { start: '08:00', end: '18:00', allDay: false, nextDay: false },
+  'AMC':  { start: '07:30', end: '16:30', allDay: false, nextDay: false },
+  'PMC':  { start: '15:00', end: '23:59', allDay: false, nextDay: false },
+  'N':    { start: '21:00', end: '07:30', allDay: false, nextDay: true },
+  'S10':  { start: '10:00', end: '19:00', allDay: false, nextDay: false },
+  'P12':  { start: '12:00', end: '21:00', allDay: false, nextDay: false },
+  'A10':  { start: '10:00', end: '19:00', allDay: false, nextDay: false },
+  'A10P': { start: '10:00', end: '19:00', allDay: false, nextDay: false },
+  'A9':   { start: '09:00', end: '18:00', allDay: false, nextDay: false },
+  'A7':   { start: '07:00', end: '16:00', allDay: false, nextDay: false },
+  'A7T':  { start: '07:00', end: '16:00', allDay: false, nextDay: false },
+  'A8C/S':{ start: '08:00', end: '18:00', allDay: false, nextDay: false },
+  'A8T':  { start: '08:00', end: '17:00', allDay: false, nextDay: false },
+  'P1':   { start: '13:00', end: '22:00', allDay: false, nextDay: false },
+  'P2':   { start: '14:00', end: '23:00', allDay: false, nextDay: false },
+  'P2SIC':{ start: '14:00', end: '23:00', allDay: false, nextDay: false },
+  'PedA7':{ start: '07:00', end: '16:00', allDay: false, nextDay: false },
+  // Mental Health shifts
+  'MH':    { start: '08:00', end: '18:00', allDay: false, nextDay: false },
+  'MHAM':  { start: '07:30', end: '16:30', allDay: false, nextDay: false },
+  'MHPM':  { start: '15:00', end: '23:59', allDay: false, nextDay: false },
+  'MHC/S': { start: '08:00', end: '18:00', allDay: false, nextDay: false },
+  // Leave / non-clinical
+  'AL':     { allDay: true, label: 'Annual Leave' },
+  'PDL':    { allDay: true, label: 'Professional Dev Leave' },
+  'ML':     { allDay: true, label: 'Maternity Leave' },
+  'LSL':    { allDay: true, label: 'Long Service Leave' },
+  'MHA/L':  { allDay: true, label: 'MH Annual Leave' },
+  'MHPDL':  { allDay: true, label: 'MH Prof Dev Leave' },
+  'DIL':    { allDay: true, label: 'Day in Lieu' },
+  'RDO':    { allDay: true, label: 'Rostered Day Off' },
+  'OFF':    { allDay: true, label: 'Day Off' },
+  'MAT':    { allDay: true, label: 'Maternity Leave' },
+  'EMET':   { allDay: true, label: 'EMET' },
+  'Emet':   { allDay: true, label: 'EMET' },
+  'ORIENT': { allDay: true, label: 'Orientation' },
+  'RFDS':   { allDay: true, label: 'RFDS' },
+  'Paeds':  { allDay: true, label: 'Paeds' },
+  'X':      { allDay: true, label: 'Unavailable' },
+  'x':      { allDay: true, label: 'Unavailable' },
+};
+
+const LOCATION = 'Lyell McEwin Hospital: Emergency Department, Haydown Rd, Elizabeth Vale SA 5112';
+
+let parsedRoster = null; // { names: [], dateColumns: [{col, date}], rows: {name: [shifts]} }
+
+// ---- Upload handling ----
+const uploadArea = document.getElementById('uploadArea');
+const fileInput = document.getElementById('fileInput');
+
+uploadArea.addEventListener('click', () => fileInput.click());
+uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+uploadArea.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadArea.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+
+function handleFile(file) {
+  document.getElementById('fileName').textContent = file.name;
+  document.getElementById('fileName').style.display = 'inline-block';
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      parseRoster(ws);
+    } catch (err) {
+      alert('Error reading file: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function parseRoster(ws) {
+  const range = XLSX.utils.decode_range(ws['!ref']);
+
+  // Row 4 (0-indexed row 3) has dates
+  const dateColumns = [];
+  for (let c = 3; c <= range.e.c; c++) { // col D onwards (0-indexed col 3)
+    const cell = ws[XLSX.utils.encode_cell({ r: 3, c })];
+    if (cell && cell.t === 'd') {
+      dateColumns.push({ col: c, date: cell.v });
+    } else if (cell && cell.t === 'n' && cell.v > 40000 && cell.v < 60000) {
+      // Excel serial date number
+      dateColumns.push({ col: c, date: excelDateToJS(cell.v) });
+    }
+  }
+
+  // Row 6+ (0-indexed row 5+) has names and shifts
+  const names = [];
+  const rows = {};
+  for (let r = 5; r <= range.e.r; r++) {
+    const nameCell = ws[XLSX.utils.encode_cell({ r, c: 0 })];
+    if (!nameCell) continue;
+    const name = String(nameCell.v).trim();
+    if (!name || !name.includes(',')) continue; // Names are "Last, First"
+    if (names.indexOf(name) !== -1) continue; // skip duplicates
+
+    names.push(name);
+    const shifts = [];
+    for (const dc of dateColumns) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c: dc.col })];
+      let val = cell ? String(cell.v).trim() : '';
+      if (val === '\u00a0' || val === 'undefined' || val === 'null') val = '';
+      if (val) {
+        shifts.push({ date: dc.date, shift: val });
+      }
+    }
+    rows[name] = shifts;
+  }
+
+  parsedRoster = { names, dateColumns, rows };
+
+  // Populate name dropdown
+  const sel = document.getElementById('nameSelect');
+  sel.innerHTML = '<option value="">-- Select your name --</option>';
+  names.forEach(n => {
+    const opt = document.createElement('option');
+    opt.value = n;
+    opt.textContent = n;
+    sel.appendChild(opt);
+  });
+
+  document.getElementById('step2').classList.remove('disabled');
+  document.getElementById('step3').classList.add('disabled');
+}
+
+function excelDateToJS(serial) {
+  // Excel epoch is 1899-12-30
+  const d = new Date(Date.UTC(1899, 11, 30));
+  d.setUTCDate(d.getUTCDate() + serial);
+  return d;
+}
+
+// ---- Name selection ----
+document.getElementById('nameSelect').addEventListener('change', function() {
+  if (!this.value || !parsedRoster) {
+    document.getElementById('step3').classList.add('disabled');
+    return;
+  }
+  renderPreview(this.value);
+  document.getElementById('step3').classList.remove('disabled');
+});
+
+function getProcessedShifts(name) {
+  const shifts = parsedRoster.rows[name] || [];
+  return shifts.map(s => {
+    const info = SHIFT_MAP[s.shift];
+    const date = new Date(s.date);
+    if (info) {
+      if (info.allDay) {
+        return { shift: s.shift, date, allDay: true, label: info.label || s.shift };
+      } else {
+        const endDate = info.nextDay ? addDays(date, 1) : date;
+        return { shift: s.shift, date, allDay: false, startTime: info.start, endTime: info.end, endDate };
+      }
+    } else {
+      // Unknown shift type - treat as all day
+      return { shift: s.shift, date, allDay: true, label: s.shift };
+    }
+  });
+}
+
+function addDays(d, n) {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+
+function formatDate(d) {
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = d.getFullYear();
+  return `${dd}/${mm}/${yy}`;
+}
+
+function formatDateISO(d) {
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${d.getFullYear()}${mm}${dd}`;
+}
+
+function formatTime12(t24) {
+  if (!t24) return '';
+  const [h, m] = t24.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+function renderPreview(name) {
+  const shifts = getProcessedShifts(name);
+  const tbody = document.querySelector('#previewTable tbody');
+  tbody.innerHTML = '';
+
+  shifts.forEach(s => {
+    const tr = document.createElement('tr');
+    const tdShift = document.createElement('td');
+    tdShift.textContent = s.shift;
+    const tdDate = document.createElement('td');
+    tdDate.textContent = formatDate(s.date);
+    const tdStart = document.createElement('td');
+    const tdEnd = document.createElement('td');
+    if (s.allDay) {
+      tdStart.textContent = 'All Day';
+      tdEnd.textContent = s.label || '';
+    } else {
+      tdStart.textContent = formatTime12(s.startTime);
+      tdEnd.textContent = formatTime12(s.endTime);
+    }
+    tr.append(tdShift, tdDate, tdStart, tdEnd);
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('shiftCount').textContent = `${shifts.length} shift(s) found`;
+}
+
+// ---- Download: Google Calendar CSV ----
+document.getElementById('btnGoogle').addEventListener('click', () => {
+  const name = document.getElementById('nameSelect').value;
+  if (!name) return;
+  const shifts = getProcessedShifts(name);
+
+  const header = 'Subject,Start Date,Start Time,End Date,End Time,All Day Event,Location';
+  const rows = shifts.map(s => {
+    if (s.allDay) {
+      return [
+        csvEscape(s.shift),
+        formatDate(s.date),
+        '',
+        formatDate(s.date),
+        '',
+        'TRUE',
+        csvEscape(LOCATION)
+      ].join(',');
+    } else {
+      return [
+        csvEscape(s.shift),
+        formatDate(s.date),
+        formatTime12(s.startTime),
+        formatDate(s.endDate),
+        formatTime12(s.endTime),
+        'FALSE',
+        csvEscape(LOCATION)
+      ].join(',');
+    }
+  });
+
+  const csv = header + '\n' + rows.join('\n');
+  downloadFile(csv, `roster_${name.replace(/[^a-zA-Z]/g, '_')}.csv`, 'text/csv');
+});
+
+function csvEscape(s) {
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+// ---- Download: ICS ----
+document.getElementById('btnIcal').addEventListener('click', () => {
+  const name = document.getElementById('nameSelect').value;
+  if (!name) return;
+  const shifts = getProcessedShifts(name);
+
+  let ics = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//LMH ED Roster//EN\r\nCALSCALE:GREGORIAN\r\n';
+
+  shifts.forEach((s, i) => {
+    ics += 'BEGIN:VEVENT\r\n';
+    ics += `UID:lmh-roster-${formatDateISO(s.date)}-${i}@lmh\r\n`;
+    ics += `SUMMARY:${icsEscape(s.shift)}\r\n`;
+    ics += `LOCATION:${icsEscape(LOCATION)}\r\n`;
+
+    if (s.allDay) {
+      ics += `DTSTART;VALUE=DATE:${formatDateISO(s.date)}\r\n`;
+      ics += `DTEND;VALUE=DATE:${formatDateISO(addDays(s.date, 1))}\r\n`;
+    } else {
+      ics += `DTSTART:${formatDateISO(s.date)}T${s.startTime.replace(':', '')}00\r\n`;
+      ics += `DTEND:${formatDateISO(s.endDate)}T${s.endTime.replace(':', '')}00\r\n`;
+    }
+
+    ics += 'END:VEVENT\r\n';
+  });
+
+  ics += 'END:VCALENDAR\r\n';
+  downloadFile(ics, `roster_${name.replace(/[^a-zA-Z]/g, '_')}.ics`, 'text/calendar');
+});
+
+function icsEscape(s) {
+  return s.replace(/[\\;,]/g, c => '\\' + c).replace(/\n/g, '\\n');
+}
+
+function downloadFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+</script>
+</body>
+</html>
