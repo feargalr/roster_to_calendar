@@ -1,6 +1,6 @@
 # Roster to Calendar
 
-Convert LMH Emergency Department roster spreadsheets into calendar files you can import into Google Calendar, Apple Calendar, or Outlook.
+Convert LMH Emergency Department roster spreadsheets into calendar files you can import into Google Calendar, Apple Calendar, or Outlook. No date is stored, nor uploaded. The processing happens on your device. 
 
 ## How to use
 
